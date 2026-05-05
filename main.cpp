@@ -21,21 +21,24 @@ int64_t process_array_neon(const int32_t* __restrict__ data, size_t n) {
     for (; i + 3 < n; i += 4) {
         int32x4_t vec = vld1q_s32(data + i);
 
-        int32x4_t mask_pos = vcgtq_s32(vec, vdupq_n_s32(0));
-        int32x4_t mask_neg = vcltq_s32(vec, vdupq_n_s32(0));
+        uint32x4_t mask_pos = vcgtq_s32(vec, vdupq_n_s32(0));
+        uint32x4_t mask_neg = vcltq_s32(vec, vdupq_n_s32(0));
 
         int32x4_t sign = vshrq_n_s32(vec, 31);
         int32x4_t abs_val = veorq_s32(vec, sign);
         abs_val = vsubq_s32(abs_val, sign);
 
-        int32x4_t pos_part = vandq_s32(vec, mask_pos);
-        int32x4_t neg_part = vandq_s32(abs_val, mask_neg);
+        int32x4_t pos_part = vreinterpretq_s32_u32(vandq_u32(vreinterpretq_u32_s32(vec), mask_pos));
+        int32x4_t neg_part = vreinterpretq_s32_u32(vandq_u32(vreinterpretq_u32_s32(abs_val), mask_neg));
         int32x4_t contrib = vorrq_s32(pos_part, neg_part);
 
         acc = vaddq_s32(acc, contrib);
     }
 
-    sum = vaddlvq_s32(acc);
+    int32x2_t lo = vget_low_s32(acc);
+    int32x2_t hi = vget_high_s32(acc);
+    int32x2_t pair = vpadd_s32(lo, hi);
+    sum = vget_lane_s32(pair, 0) + vget_lane_s32(pair, 1);
 
     for (; i < n; ++i) {
         int32_t val = data[i];
@@ -62,8 +65,9 @@ int main() {
     auto neon_us   = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
 
     std::cout << "Скалярная реализация: " << r1 << " (" << scalar_us / 1e6 << " s)\n";
-    std::cout << "Реализация NEON: " << r2 << " (" << neon_us   / 1e6 << " s)\n";
+    std::cout << "Реализация NEON: " << r2 << " (" << neon_us / 1e6 << " s)\n";
     std::cout << "Ускорение в: " << (double)scalar_us / neon_us << " раз.\n";
+    std::cout << ((r1 == r2) ? "OK" : "MISMATCH") << "\n";
 
     return (r1 == r2) ? 0 : 1;
 }
