@@ -50,7 +50,7 @@ int64_t process_array_neon(const int32_t* __restrict__ data, size_t n) {
 }
 
 int main() {
-    const size_t N = 1000000;
+    const size_t N = 100000000;
     alignas(16) static int32_t data[N];
     for (size_t i = 0; i < N; ++i)
         data[i] = (int32_t)(i % 7) - 3;
