@@ -10,18 +10,21 @@
 #include <cmath>
 #include <cstdio>
 
-static const int NUM = 50;
+static const int NUM = 80;
 static size_t bench_ns[NUM];
 static char bench_labels[NUM][16];
 static const char* bench_label_ptrs[NUM];
 
 void init_bench_sizes() {
-    double log_min = log10(10.0);
-    double log_max = log10(100000000.0);
+    const double lo = std::log2(512.0);
+    const double hi = std::log2(4194304.0);
     for (int i = 0; i < NUM; ++i) {
-        double t = (double)i / (NUM - 1);
-        bench_ns[i] = (size_t)pow(10.0, log_min + t * (log_max - log_min));
-        if (bench_ns[i] < 1) bench_ns[i] = 1;
+        double t   = (double)i / (double)(NUM - 1);
+        double exp = lo + t * (hi - lo);
+        std::size_t s = static_cast<std::size_t>(std::round(std::pow(2.0, exp)));
+        s = (s + 15) & ~std::size_t(15);
+        if (s < 16) s = 16;
+        bench_ns[i] = s;
         if (bench_ns[i] >= 1000000)
             snprintf(bench_labels[i], 16, "%.1fM", bench_ns[i] / 1000000.0);
         else if (bench_ns[i] >= 1000)
@@ -31,6 +34,8 @@ void init_bench_sizes() {
         bench_label_ptrs[i] = bench_labels[i];
     }
 }
+
+
 
 int64_t process_array_scalar(const int32_t* data, size_t n) {
     int64_t sum = 0;
@@ -97,7 +102,6 @@ void run_all(std::vector<BenchResult>& results, int iters) {
         }
         double s = sum_s / iters;
         double ne = sum_n / iters;
-        if (ne < 0.001) ne = 0.001;
         results[i] = { s, ne, s / ne, bench_label_ptrs[i], (double)bench_ns[i] };
     }
 }
@@ -170,6 +174,7 @@ int main() {
 
             if (ImPlot::BeginPlot("##time", {-1, 220})) {
                 ImPlot::SetupAxes("Array size", "Time (s)");
+                ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
                 ImPlot::SetupAxis(ImAxis_X1, NULL, ImPlotAxisFlags_AutoFit);
                 ImPlot::SetupAxis(ImAxis_Y1, NULL, ImPlotAxisFlags_AutoFit);
                 if (chart_type == 0) {
@@ -177,7 +182,27 @@ int main() {
                     ImPlot::PlotBars("NEON", xs, ys_n, NUM, 0.35);
                 } else {
                     ImPlot::PlotLine("Scalar", xs, ys_s, NUM);
+                    {
+                        ImVec4 c0 = ImPlot::GetColormapColor(0);
+                        ImPlot::PlotScatter("##sc", xs, ys_s, NUM, {
+                            ImPlotProp_Marker, ImPlotMarker_Circle,
+                            ImPlotProp_MarkerSize, 3.5f,
+                            ImPlotProp_MarkerFillColor, ImGui::ColorConvertFloat4ToU32(c0),
+                            ImPlotProp_LineWeight, 1.0f,
+                            ImPlotProp_MarkerLineColor, ImGui::ColorConvertFloat4ToU32(c0)
+                        });
+                    }
                     ImPlot::PlotLine("NEON", xs, ys_n, NUM);
+                    {
+                        ImVec4 c1 = ImPlot::GetColormapColor(1);
+                        ImPlot::PlotScatter("##ne", xs, ys_n, NUM, {
+                            ImPlotProp_Marker, ImPlotMarker_Circle,
+                            ImPlotProp_MarkerSize, 3.5f,
+                            ImPlotProp_MarkerFillColor, ImGui::ColorConvertFloat4ToU32(c1),
+                            ImPlotProp_LineWeight, 1.0f,
+                            ImPlotProp_MarkerLineColor, ImGui::ColorConvertFloat4ToU32(c1)
+                        });
+                    }
                 }
                 ImPlot::EndPlot();
             }
@@ -188,6 +213,7 @@ int main() {
 
             if (ImPlot::BeginPlot("##speedup", {-1, 150})) {
                 ImPlot::SetupAxes("Array size", "Speedup");
+                ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
                 ImPlot::SetupAxis(ImAxis_X1, NULL, ImPlotAxisFlags_AutoFit);
                 ImPlot::SetupAxis(ImAxis_Y1, NULL, ImPlotAxisFlags_AutoFit);
                 // ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 10, ImPlotCond_Always);
@@ -195,6 +221,16 @@ int main() {
                     ImPlot::PlotBars("Speedup", xs, ys_sp, NUM, 0.5);
                 } else {
                     ImPlot::PlotLine("Speedup", xs, ys_sp, NUM);
+                    {
+                        ImVec4 c0 = ImPlot::GetColormapColor(0);
+                        ImPlot::PlotScatter("##sp", xs, ys_sp, NUM, {
+                            ImPlotProp_Marker, ImPlotMarker_Circle,
+                            ImPlotProp_MarkerSize, 3.5f,
+                            ImPlotProp_MarkerFillColor, ImGui::ColorConvertFloat4ToU32(c0),
+                            ImPlotProp_LineWeight, 1.0f,
+                            ImPlotProp_MarkerLineColor, ImGui::ColorConvertFloat4ToU32(c0)
+                        });
+                    }
                 }
                 ImPlot::EndPlot();
             }
