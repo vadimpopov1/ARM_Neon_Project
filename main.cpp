@@ -8,7 +8,6 @@
 #include <chrono>
 #include <cmath>
 
-__attribute__((optimize("no-tree-vectorize")))
 int64_t process_array_scalar(const int32_t* data, size_t n) {
     int64_t sum = 0;
     for (size_t i = 0; i < n; ++i) {
@@ -54,23 +53,59 @@ struct BenchResult {
     const char* label;
 };
 
-BenchResult run_bench(size_t n, const char* label) {
+struct BenchSizes {
+    size_t n;
+    const char* label;
+};
+
+static const BenchSizes bench_sizes[] = {
+    { 10000, "10K" },
+    { 100000, "100K" },
+    { 1000000, "1M" },
+    { 10000000, "10M" },
+    { 100000000, "100M" },
+    { 1000000000, "1B" },
+};
+static const int num_sizes = sizeof(bench_sizes) / sizeof(bench_sizes[0]);
+
+void run_bench(BenchResult* result, int iterations) {
+    size_t n = result->n;
     std::vector<int32_t> data(n);
     for (size_t i = 0; i < n; ++i)
         data[i] = (int32_t)(i % 7) - 3;
 
-    auto t1 = std::chrono::high_resolution_clock::now();
-    volatile int64_t r1 = process_array_scalar(data.data(), n);
-    auto t2 = std::chrono::high_resolution_clock::now();
-    volatile int64_t r2 = process_array_neon(data.data(), n);
-    auto t3 = std::chrono::high_resolution_clock::now();
-    (void)r1; (void)r2;
+    double sum_s = 0.0, sum_ne = 0.0;
 
-    double s  = std::chrono::duration<double, std::milli>(t2 - t1).count();
-    double ne = std::chrono::duration<double, std::milli>(t3 - t2).count();
+    for (int iter = 0; iter < iterations; ++iter) {
+        auto t1 = std::chrono::high_resolution_clock::now();
+        volatile int64_t r1 = process_array_scalar(data.data(), n);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        volatile int64_t r2 = process_array_neon(data.data(), n);
+        auto t3 = std::chrono::high_resolution_clock::now();
+        (void)r1; (void)r2;
 
-    if (ne < 0.001) ne = 0.001;
-    return { n, s, ne, s / ne, label };
+        double s = std::chrono::duration<double, std::milli>(t2 - t1).count();
+        double ne = std::chrono::duration<double, std::milli>(t3 - t2).count();
+
+        sum_s += s;
+        sum_ne += ne;
+    }
+
+    double avg_s = sum_s / iterations;
+    double avg_ne = sum_ne / iterations;
+    if (avg_ne < 0.001) avg_ne = 0.001;
+
+    result->scalar_ms = avg_s;
+    result->neon_ms = avg_ne;
+    result->speedup = avg_s / avg_ne;
+}
+
+void run_all_benchmarks(std::vector<BenchResult>& results, int iterations) {
+    for (int i = 0; i < num_sizes; ++i) {
+        results[i].n = bench_sizes[i].n;
+        results[i].label = bench_sizes[i].label;
+        run_bench(&results[i], iterations);
+    }
 }
 
 int main() {
@@ -82,7 +117,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(900, 620, "NEON Benchmark", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(900, 650, "NEON Benchmark", NULL, NULL);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
@@ -92,28 +127,9 @@ int main() {
     ImGui_ImplOpenGL3_Init("#version 330");
     ImGui::StyleColorsDark();
 
-    std::vector<BenchResult> results;
-    results.push_back(run_bench(10,        "10"));
-    results.push_back(run_bench(100,       "100"));
-    results.push_back(run_bench(1000,      "1K"));
-    results.push_back(run_bench(10000,     "10K"));
-    results.push_back(run_bench(100000,    "100K"));
-    results.push_back(run_bench(1000000,   "1M"));
-    results.push_back(run_bench(10000000,  "10M"));
-    results.push_back(run_bench(100000000, "100M"));
-
-    int n = (int)results.size();
-
-    std::vector<float> scalar_ms(n), neon_ms(n), speedups(n);
-    float max_val = 0.001f;
-    for (int i = 0; i < n; ++i) {
-        scalar_ms[i] = (float)results[i].scalar_ms;
-        neon_ms[i]   = (float)results[i].neon_ms;
-        speedups[i]  = (float)results[i].speedup;
-        if (scalar_ms[i] > max_val) max_val = scalar_ms[i];
-        if (neon_ms[i]   > max_val) max_val = neon_ms[i];
-    }
-    max_val *= 1.2f;
+    std::vector<BenchResult> results(num_sizes);
+    int iterations = 5;
+    bool need_rebench = true;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -122,11 +138,41 @@ int main() {
         ImGui::NewFrame();
 
         ImGui::SetNextWindowPos({0, 0});
-        ImGui::SetNextWindowSize({900, 620});
+        ImGui::SetNextWindowSize({900, 650});
         ImGui::Begin("NEON Benchmark", nullptr,
             ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
-        ImGui::Text("Scalar vs NEON — time (ms)");
+        ImGui::Text("Benchmark settings");
+        ImGui::Separator();
+
+        ImGui::SliderInt("Iterations", &iterations, 1, 50);
+
+        ImGui::SameLine();
+        if (ImGui::Button(" Run benchmark ")) {
+            need_rebench = true;
+        }
+
+        ImGui::Spacing();
+
+        if (need_rebench) {
+            run_all_benchmarks(results, iterations);
+            need_rebench = false;
+        }
+
+        int n = num_sizes;
+
+        std::vector<float> scalar_ms(n), neon_ms(n), speedups(n);
+        float max_val = 0.001f;
+        for (int i = 0; i < n; ++i) {
+            scalar_ms[i] = (float)results[i].scalar_ms;
+            neon_ms[i] = (float)results[i].neon_ms;
+            speedups[i] = (float)results[i].speedup;
+            if (scalar_ms[i] > max_val) max_val = scalar_ms[i];
+            if (neon_ms[i] > max_val) max_val = neon_ms[i];
+        }
+        max_val *= 1.2f;
+
+        ImGui::Text("Scalar vs NEON — time (ms)  —  averaged over %d run(s)", iterations);
         ImGui::Separator();
 
         ImDrawList* draw = ImGui::GetWindowDrawList();
@@ -152,9 +198,9 @@ int main() {
 
         ImGui::Dummy({W, H + 20});
 
-        ImGui::TextColored({0.4f, 0.63f, 1.f, 1.f}, "  Scalar");
+        ImGui::TextColored({0.4f, 0.63f, 1.f, 1.f}, "Scalar");
         ImGui::SameLine();
-        ImGui::TextColored({0.31f, 0.86f, 0.47f, 1.f}, "  NEON");
+        ImGui::TextColored({0.31f, 0.86f, 0.47f, 1.f}, "NEON");
 
         ImGui::Spacing();
         ImGui::Separator();
@@ -166,17 +212,21 @@ int main() {
         ImGui::SetColumnWidth(1, 160);
         ImGui::SetColumnWidth(2, 160);
         ImGui::SetColumnWidth(3, 120);
-        ImGui::Text("Size");      ImGui::NextColumn();
+        ImGui::Text("Size"); ImGui::NextColumn();
         ImGui::Text("Scalar (ms)"); ImGui::NextColumn();
-        ImGui::Text("NEON (ms)");   ImGui::NextColumn();
-        ImGui::Text("Speedup");     ImGui::NextColumn();
+        ImGui::Text("NEON (ms)"); ImGui::NextColumn();
+        ImGui::Text("Speedup"); ImGui::NextColumn();
         ImGui::Separator();
 
         for (int i = 0; i < n; ++i) {
-            ImGui::Text("%s", results[i].label);          ImGui::NextColumn();
-            ImGui::Text("%.4f", scalar_ms[i]);            ImGui::NextColumn();
-            ImGui::Text("%.4f", neon_ms[i]);              ImGui::NextColumn();
-            ImGui::TextColored({1.f, 0.85f, 0.2f, 1.f}, "%.2fx", speedups[i]); ImGui::NextColumn();
+            ImGui::Text("%s", results[i].label); 
+            ImGui::NextColumn();
+            ImGui::Text("%.4f", scalar_ms[i]); 
+            ImGui::NextColumn();
+            ImGui::Text("%.4f", neon_ms[i]); 
+            ImGui::NextColumn();
+            ImGui::TextColored({1.f, 0.85f, 0.2f, 1.f}, "%.2fx", speedups[i]); 
+            ImGui::NextColumn();
         }
         ImGui::Columns(1);
         ImGui::End();

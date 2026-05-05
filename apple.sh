@@ -2,7 +2,7 @@
 
 GLFW=/opt/homebrew/opt/glfw
 
-g++ -O2 -march=armv8-a+simd -fno-tree-vectorize \
+g++ -O3 -march=armv8-a+simd -fno-tree-vectorize \
   -I imgui -I imgui/backends \
   -I $GLFW/include \
   -DGL_SILENCE_DEPRECATION \

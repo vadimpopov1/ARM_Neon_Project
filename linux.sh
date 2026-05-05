@@ -1,6 +1,6 @@
 #!/bin/bash
 
-g++ -O2 -march=armv8-a -mfpu=neon -fno-tree-vectorize \
+g++ -O3 -march=armv8-a -mfpu=neon -fno-tree-vectorize \
   -I imgui -I imgui/backends \
   -DGL_SILENCE_DEPRECATION \
   imgui/imgui.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp \
